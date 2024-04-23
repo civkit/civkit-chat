@@ -1,0 +1,36 @@
+html
+	head
+		meta(charset="utf-8")
+		meta(name="viewport" content="width=device-width, initial-scale=1")
+		script(src="/js/lib/eruda.min.js")
+		script
+			|eruda.init();
+		script(src="/js/lib/openpgp.min.js")
+		script(src="/js/app/chatroom.js")
+		style
+			| .valid-sig { color: green; }
+			| .bad-sig { color: red; }
+			| .crypt { color: #ddd; font-size: 25%; }
+			| .from-me::before { content: '> '; }
+			| .from-them::before { content: '< '; }
+	body
+		input#chat-id(type="hidden" value=chat_id)
+		input#privkey.privkey(type="hidden" value=dispute_private_key)
+		input#pubkey-a.pubkey(type="hidden" value=pubkey_a)
+		input#pubkey-b.pubkey(type="hidden" value=pubkey_b)
+		input#disputed-by(type="hidden" value=disputed_by)
+		section
+			h2 Messages
+			ul
+				each msg in messages.reverse()
+					li
+						pre.crypt
+							=msg
+		section
+			h2 Debug Info
+			p
+				=`User A key: ${pubkey_a}`
+			p
+				=`User B key: ${pubkey_b}`
+		script
+			| initChatroom()
