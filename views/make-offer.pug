@@ -12,7 +12,13 @@ html
     script.
       async function uiMakeChat() {
         const keys = await makeNewKey();
-        const response = await fetch('/api/chat/make-offer', {
+        const urlParams = new URLSearchParams(window.location.search);
+        const orderId = urlParams.get('orderId');
+        if (!orderId) {
+          console.error('Order ID is missing from the URL');
+          return;
+        }
+        const response = await fetch('/api/chat/make-offer?orderId=' + orderId, {
           method: "POST",
           cache: "no-cache",
           headers: {
@@ -20,9 +26,12 @@ html
           },
           body: JSON.stringify(pluckPub(keys)),
         });
-        const { token } = await response.json();
+        if (!response.ok) {
+          throw new Error(`HTTP error! Status: ${response.status}`);
+        }
+        const { token, acceptOfferUrl } = await response.json();
         console.log('Generated chat ID:', token);
         saveKey(keys, token);
-        alert(`Make Offer URL: /ui/chat/room/${token}\nAccept Offer URL: /ui/chat/accept-offer/${token}`);
+        alert(`Make Offer URL: /ui/chat/room/${token}\nAccept Offer URL: ${acceptOfferUrl}`);
         window.location.href = `/ui/chat/room/${token}`;
       }
