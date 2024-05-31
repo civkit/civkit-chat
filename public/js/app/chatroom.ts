@@ -33,26 +33,25 @@ function pluckPub(keys: KeyPair): PubKey {
 async function makeNewKey() : Promise<KeyPair> {
 	// values that we don't use, but which the OpenPGP.js library needs for key generation
 	const dummyValues = {
-		userIDs: [{name:'', email:''}],
+		userIDs: [{ name: '', email: '' }],
 		passphrase: '', // passphrase might actually come in handy at some point, but currently, we don't use it
 	};
 
-	const { privateKey, publicKey, revocationCertificate } = await openpgp.generateKey({
+	const { privateKey, publicKey } = await openpgp.generateKey({
 		type: 'ecc', // Type of the key, defaults to ECC
 		curve: 'curve25519', // ECC curve name, defaults to curve25519
 		format: 'armored', // output key format, defaults to 'armored' (other options: 'binary' or 'object')
-
 		...dummyValues,
 	});
 
 	return { pub: publicKey, priv: privateKey };
 }
 
-function saveKey(keys : KeyPair, chatId: string) {
+function saveKey(keys: KeyPair, chatId: string) {
 	localStorage.setItem(`chat-key-${chatId}`, JSON.stringify(keys));
 }
 
-function loadKey(chatId: string) : KeyPair {
+function loadKey(chatId: string): KeyPair {
 	const keyOverride = document.querySelector('#privkey');
 	if (keyOverride) {
 		return { priv: keyOverride.value, pub: null };
@@ -61,28 +60,31 @@ function loadKey(chatId: string) : KeyPair {
 	}
 }
 
+async function uiMakeChat() {
+    const keys = await makeNewKey();
+    const response = await fetch('/api/chat/make-offer', {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify(pluckPub(keys)),
+    });
 
-function uiMakeOffer() {
-	(async () => {
-		const keys: KeyPair = await makeNewKey();
+    const { token } = await response.json();
+    const acceptOfferUrl = `/ui/chat/accept-offer/${token}`;
 
-		const response = await fetch('/api/chat/make-offer', {
-			method: "POST",
-			cache: "no-cache",
-			headers: {
-				"Content-Type": "application/json",
-			},
-			body: JSON.stringify(pluckPub(keys)),
-		})
+    // Save URL to the server or notify another service
+    await fetch('/api/save-or-notify-url', {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({ url: acceptOfferUrl, chatId: token })
+    });
 
-		// Q from heather: is there a way to destructure objects while assigning, in TS?
-		const token: string = (await response.json()).token;
-
-		saveKey(keys, token);
-
-		window.location.href = `/ui/chat/room/${token}`;
-	})()
+    // Log and redirect
+    console.log('Generated chat ID:', token);
+    console.log('Accept Offer URL:', acceptOfferUrl);
+    saveKey(keys, token);
+    window.location.href = `/ui/chat/room/${token}`;
 }
+
 function uiAcceptOffer() {
 	(async () => {
 		const keys: KeyPair = await makeNewKey();
