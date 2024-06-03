@@ -88,31 +88,18 @@ app.post('/api/chat/make-offer', async (req, res) => {
 });
 
 // Handle accept-offer endpoint
-app.get('/ui/chat/accept-offer/:token', async (req, res) => {
-    const token = req.params.token;
-    const orderId = req.query.orderId;
+app.post('/api/chat/accept-offer/:chat_id', async (req, res) => {
+    const { chat_id } = req.params;
+    const data = await loadFrom(chat_id);
 
-    console.log("Received token:", token);
-    console.log("Received orderId:", orderId);
-
-    const data = await loadFromTokenAndOrderId(token, orderId);
-    if (!data) {
-        return res.status(404).send('Chat or order not found.');
+    if (data.pubkey_b) {
+        return res.status(400).json({ error: 'Chat already accepted by another user.' });
     }
 
-    res.render('accept-offer', { ...data, chat_id: token, orderId: orderId });
+    data.pubkey_b = req.body.pubkey;
+    await writeTo(chat_id, data);
+    res.json({ ok: true });
 });
-
-async function loadFromTokenAndOrderId(token, orderId) {
-    const query = 'SELECT * FROM chats WHERE token = $1 AND order_id = $2';
-    try {
-        const res = await db.query(query, [token, orderId]);
-        return res.rows[0];
-    } catch (err) {
-        console.error(err.stack);
-        return null;
-    }
-}
 
 // Handle adding a message to the chat
 app.post('/api/chat/add-message/:chat_id', async (req, res) => {
