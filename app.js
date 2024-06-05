@@ -1,123 +1,158 @@
-const express = require('express')
-const app = express()
-const port = 3456
+const express = require('express');
+const app = express();
+const port = 3456;
+require('dotenv').config();
 
-app.use(express.static('public'))
-
-app.set('view engine', 'pug')
-
-app.use(express.json())
-
-// BOILERPLATE ABOVE
-
-
+app.use(express.static('public'));
+app.set('view engine', 'pug');
+app.use(express.json());
 
 const fsProm = require('fs/promises');
+const path = require('path');
+const db = require('./dbConfig.ts'); // Adjust the path to where you've set up the pool
 
-// APP CODE START
-
-
-// simple pair of helpers
+// Helper functions
 async function writeTo(chat_id, data) {
-	return fsProm.writeFile(`./data/${chat_id}.json`, JSON.stringify(data));
+    if (!chat_id) {
+        console.error('Chat ID is undefined');
+        throw new Error('Chat ID is undefined');
+    }
+    return fsProm.writeFile(path.join(__dirname, `./data/${chat_id}.json`), JSON.stringify(data));
 }
+
 async function loadFrom(chat_id) {
-	return JSON.parse(await fsProm.readFile(`./data/${chat_id}.json`));
+    if (!chat_id) {
+        console.error('Chat ID is undefined');
+        throw new Error('Chat ID is undefined');
+    }
+    return JSON.parse(await fsProm.readFile(path.join(__dirname, `./data/${chat_id}.json`)));
 }
 
-app.post('/api/chat/make-offer/?', async (req, res) => {
-	const chars = '0123456789';
-	let token = '';
-	while (token.length < 10) {
-		// NOT SECURE! demo use only!
-		token += chars[Math.floor(Math.random() * chars.length)];
-	}
+// Update the database with the token, chatroom_url, and accept offer URL
+async function updateDatabaseWithToken(orderId, token, acceptOfferUrl, chatroomUrl) {
+    try {
+        const selectQuery = 'SELECT * FROM chats WHERE order_id = $1';
+        const selectResult = await db.query(selectQuery, [orderId]);
 
-	const data = {
-		pubkey_a: req.body.pubkey,
-		pubkey_b: null,
-		messages: [],
-	}
+        if (selectResult.rows.length > 0) {
+            // Update existing row
+            const updateQuery = 'UPDATE chats SET token = $1, accept_offer_url = $2, chatroom_url = $3 WHERE order_id = $4 RETURNING *';
+            const updateResult = await db.query(updateQuery, [token, acceptOfferUrl, chatroomUrl, orderId]);
+            console.log("Database update result:", updateResult.rows);
+        } else {
+            // Insert new row
+            const insertQuery = 'INSERT INTO chats (order_id, token, accept_offer_url, chatroom_url) VALUES ($1, $2, $3, $4) RETURNING *';
+            const insertResult = await db.query(insertQuery, [orderId, token, acceptOfferUrl, chatroomUrl]);
+            console.log("Database insert result:", insertResult.rows);
+        }
+    } catch (err) {
+        console.error("Error updating database:", err.stack);
+    }
+}
 
-	await writeTo(token, data);
+// Handle make-offer endpoint
+app.post('/api/chat/make-offer', async (req, res) => {
+    const { pubkey } = req.body;
+    const orderId = req.query.orderId; // Get orderId from query params
+    console.log("Received orderId:", orderId);
 
-	res.json({ token });
-})
+    if (!orderId) {
+        return res.status(400).json({ error: 'Order ID is required.' });
+    }
 
-app.post('/api/chat/accept-offer/:chat_id/?', async (req, res) => {
-	const {chat_id} = req.params;
-	const data = await loadFrom(chat_id);
+    let token = '';
+    const chars = '0123456789';
+    while (token.length < 10) {
+        token += chars[Math.floor(Math.random() * chars.length)];
+    }
 
-	if (data.pubkey_b) {
-		return res.json({ok:false});	
-	}
+    console.log("Generated token:", token);
 
-	data.pubkey_b = req.body.pubkey;
+    const data = {
+        pubkey_a: pubkey,
+        pubkey_b: null,
+        messages: [],
+        orderId: orderId,
+        token: token
+    };
 
-	await writeTo(chat_id, data);
+    await writeTo(token, data);
 
-	res.json({ ok:true });
-})
+    const acceptOfferUrl = `http://localhost:3456/ui/chat/accept-offer/${token}?orderId=${orderId}`;
+    const chatroomUrl = `http://localhost:3456/ui/chat/room/${token}`;
+    console.log(`Accept Offer URL: ${acceptOfferUrl}`);
 
-app.post('/api/chat/add-message/:chat_id/?', async (req, res) => {
-	const {chat_id} = req.params;
-	const data = await loadFrom(chat_id);
+    await updateDatabaseWithToken(orderId, token, acceptOfferUrl, chatroomUrl);
 
-	if (data.has_dispute) {
-		return res.json({ok: false})
-	}
+    res.json({ token, acceptOfferUrl });
+});
 
-	data.messages.push(req.body.message);
+// Handle accept-offer endpoint
+app.post('/api/chat/accept-offer/:chat_id', async (req, res) => {
+    const { chat_id } = req.params;
+    const data = await loadFrom(chat_id);
 
-	await writeTo(chat_id, data);
+    if (data.pubkey_b) {
+        return res.status(400).json({ error: 'Chat already accepted by another user.' });
+    }
 
-	res.json({ok: true});
-})
+    data.pubkey_b = req.body.pubkey;
+    await writeTo(chat_id, data);
+    res.json({ ok: true });
+});
 
-app.post('/api/chat/raise-dispute/:chat_id/?', async(req, res) => {
-	const {chat_id} = req.params;
-	const data = await loadFrom(chat_id);
+// Handle adding a message to the chat
+app.post('/api/chat/add-message/:chat_id', async (req, res) => {
+    const { chat_id } = req.params;
+    const data = await loadFrom(chat_id);
 
-	// TODO FOR REAL IMPL: validate that the user is authorized to do this (check keys, etc.)
+    if (data.has_dispute) {
+        return res.json({ ok: false });
+    }
 
-	data.has_dispute = true;
+    data.messages.push(req.body.message);
+    await writeTo(chat_id, data);
+    res.json({ ok: true });
+});
 
-	data.dispute_private_key = req.body.privateKey;
-	data.disputed_by = req.body.byUser;
+// Handle raising a dispute
+app.post('/api/chat/raise-dispute/:chat_id', async (req, res) => {
+    const { chat_id } = req.params;
+    const data = await loadFrom(chat_id);
 
-	await writeTo(chat_id, data);
+    data.has_dispute = true;
+    data.dispute_private_key = req.body.privateKey;
+    data.disputed_by = req.body.byUser;
 
-	res.json({ok: true});
-})
+    await writeTo(chat_id, data);
+    res.json({ ok: true });
+});
 
-app.get('/ui/chat/make-offer/?', async(req, res) => {
-	res.render('make-offer')
-})
+// Render make-offer page
+app.get('/ui/chat/make-offer', (req, res) => {
+    const orderId = req.query.orderId;
+    res.render('make-offer', { orderId });
+});
 
-app.get('/ui/chat/accept-offer/:chat_id/?', async(req, res) => {
-	const data = await loadFrom(req.params.chat_id)
-	res.render('accept-offer', {...data, chat_id: req.params.chat_id})
-})
+// Render accept-offer page
+app.get('/ui/chat/accept-offer/:chat_id', async (req, res) => {
+    const data = await loadFrom(req.params.chat_id);
+    res.render('accept-offer', { ...data, chat_id: req.params.chat_id });
+});
 
-app.get('/ui/chat/room/:chat_id/?', async(req, res) => {
-	const data = await loadFrom(req.params.chat_id)
-	res.render('chatroom', {...data, chat_id: req.params.chat_id })
-})
+// Render chatroom page
+app.get('/ui/chat/room/:chat_id', async (req, res) => {
+    const data = await loadFrom(req.params.chat_id);
+    res.render('chatroom', { ...data, chat_id: req.params.chat_id });
+});
 
-app.get('/ui/chat/moderator-view/:chat_id/?', async(req, res) => {
-	const data = await loadFrom(req.params.chat_id)
-	res.render('moderator-view', {...data, chat_id: req.params.chat_id })
-})
+// Render moderator-view page
+app.get('/ui/chat/moderator-view/:chat_id', async (req, res) => {
+    const data = await loadFrom(req.params.chat_id);
+    res.render('moderator-view', { ...data, chat_id: req.params.chat_id });
+});
 
-// APP CODE END
-
-
-// BOILERPLATE BELOW
-
-app.get('/', (req, res) => {
-	res.send('Hello World!')
-})
-
+// Start the server
 app.listen(port, () => {
-	console.log(`Example app listening on port ${port}`)
-})
+    console.log(`Example app listening on port ${port}`);
+});

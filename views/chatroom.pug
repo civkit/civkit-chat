@@ -1,50 +1,55 @@
+doctype html
 html
-	head
-		meta(charset="utf-8")
-		meta(name="viewport" content="width=device-width, initial-scale=1")
-		script(src="/js/lib/openpgp.min.js")
-		script(src="/js/app/chatroom.js")
-		style
-			| .valid-sig { color: green; }
-			| .bad-sig { color: red; }
-			| .crypt { color: #ddd; font-size: 25%; }
-			| .from-me::before { content: '> '; }
-			| .from-them::before { content: '< '; }
-	body
-		input#chat-id(type="hidden" value=chat_id)
-		input#pubkey-a.pubkey(type="hidden" value=pubkey_a)
-		input#pubkey-b.pubkey(type="hidden" value=pubkey_b)
-		section
-			h2 Status
-			ul
-				li
-					if pubkey_b
-						| Started
-						button#dispute(onclick="raiseDispute()") raise dispute
-					else
-						| Waiting for second user...
-						a(href=`/ui/chat/accept-offer/${chat_id}`)
-							| (send this link to someone)
-				li
-					="I am "
-					span#show-role
-		section
-			h2 Messages
-			if !has_dispute
-				textarea#chat
-				button#send(onclick="sendMessage()") send
-			else
-				p chat closed: transaction is disputed
-			ul
-				each msg in messages.reverse()
-					li
-						pre.crypt
-							=msg
-		section
-			h2 Debug Info
-			p
-				=`User A key: ${pubkey_a}`
-			p
-				=`User B key: ${pubkey_b}`
-		script
-			| initChatroom()
+  head
+    meta(charset="utf-8")
+    meta(name="viewport" content="width=device-width, initial-scale=1")
+    script(src="/js/lib/openpgp.min.js")
+    script(src="/js/app/chatroom.js")
+    style
+      | .valid-sig { color: green; }
+      | .bad-sig { color: red; }
+      | .crypt { color: #ddd; font-size: 25%; }
+      | .from-me::before { content: '> '; }
+      | .from-them::before { content: '< '; }
+  body
+    input#chat-id(type="hidden" value=chat_id)
+    input#pubkey-a.pubkey(type="hidden" value=pubkey_a class="my-key")
+    input#pubkey-b.pubkey(type="hidden" value=pubkey_b class="partner-key")
+    section
+      h2 Status
+      ul
+        li
+          if pubkey_b
+            | Started
+            button#dispute(onclick="raiseDispute()") raise dispute
+          else
+            | Waiting for second user...
+            a(href=`/ui/chat/accept-offer/${chat_id}`)
+              | (send this link to someone)
+        li
+          ="I am "
+          span#show-role
+    section
+      h2 Messages
+      if !has_dispute
+        textarea#chat
+        button#send(onclick="sendMessage()") send
+      else
+        p chat closed: transaction is disputed
+      ul
+        each msg in messages.reverse()
+          li
+            pre.crypt
+              =msg
+    section
+      h2 Debug Info
+      p
+        =`User A key: ${pubkey_a}`
+      p
+        =`User B key: ${pubkey_b}`
+    script.
+      console.log("Chat ID:", "#{chat_id}");
+      console.log("Pubkey A:", "#{pubkey_a}");
+      console.log("Pubkey B:", "#{pubkey_b}");
+      console.log("Has Dispute:", "#{has_dispute}");
+      initChatroom()

@@ -1,25 +1,23 @@
 interface KeyPair {
-	pub: string;
-	priv: string;
-	// ignore the revocation certificate, we don't need that for our app
+    pub: string;
+    priv: string;
 }
 
 interface PubKey {
-	pubkey: string;
+    pubkey: string;
 }
 
 interface Decrypted {
-	plain: string;
-	valid: ValidityPair;
+    plain: string;
+    valid: ValidityPair;
 }
+
 interface ValidityPair {
-	mine: boolean;
-	theirs: boolean;
+    mine: boolean;
+    theirs: boolean;
 }
 
 declare const openpgp;
-
-// TODO set up typescript config so that these browser apis are pre-included
 declare const localStorage;
 declare const console;
 declare const fetch;
@@ -27,243 +25,345 @@ declare const window;
 declare const document;
 
 function pluckPub(keys: KeyPair): PubKey {
-	return {pubkey: keys.pub}
+    return { pubkey: keys.pub };
 }
 
-async function makeNewKey() : Promise<KeyPair> {
-	// values that we don't use, but which the OpenPGP.js library needs for key generation
-	const dummyValues = {
-		userIDs: [{name:'', email:''}],
-		passphrase: '', // passphrase might actually come in handy at some point, but currently, we don't use it
-	};
+async function makeNewKey(): Promise<KeyPair> {
+    const dummyValues = {
+        userIDs: [{ name: '', email: '' }],
+        passphrase: '',
+    };
 
-	const { privateKey, publicKey, revocationCertificate } = await openpgp.generateKey({
-		type: 'ecc', // Type of the key, defaults to ECC
-		curve: 'curve25519', // ECC curve name, defaults to curve25519
-		format: 'armored', // output key format, defaults to 'armored' (other options: 'binary' or 'object')
+    const { privateKey, publicKey } = await openpgp.generateKey({
+        type: 'ecc',
+        curve: 'curve25519',
+        format: 'armored',
+        ...dummyValues,
+    });
 
-		...dummyValues,
-	});
-
-	return { pub: publicKey, priv: privateKey };
+    return { pub: publicKey, priv: privateKey };
 }
 
-function saveKey(keys : KeyPair, chatId: string) {
-	localStorage.setItem(`chat-key-${chatId}`, JSON.stringify(keys));
+function saveKey(keys: KeyPair, chatId: string) {
+    localStorage.setItem(`chat-key-${chatId}`, JSON.stringify(keys));
 }
 
-function loadKey(chatId: string) : KeyPair {
-	const keyOverride = document.querySelector('#privkey');
-	if (keyOverride) {
-		return { priv: keyOverride.value, pub: null };
-	} else {
-		return JSON.parse(localStorage.getItem(`chat-key-${chatId}`));
-	}
+function loadKey(chatId: string): KeyPair {
+    return JSON.parse(localStorage.getItem(`chat-key-${chatId}`));
 }
 
-
-function uiMakeOffer() {
-	(async () => {
-		const keys: KeyPair = await makeNewKey();
-
-		const response = await fetch('/api/chat/make-offer', {
-			method: "POST",
-			cache: "no-cache",
-			headers: {
-				"Content-Type": "application/json",
-			},
-			body: JSON.stringify(pluckPub(keys)),
-		})
-
-		// Q from heather: is there a way to destructure objects while assigning, in TS?
-		const token: string = (await response.json()).token;
-
-		saveKey(keys, token);
-
-		window.location.href = `/ui/chat/room/${token}`;
-	})()
+function getOrderIdFromURL() {
+    const urlParams = new URLSearchParams(window.location.search);
+    return urlParams.get('orderId');
 }
-function uiAcceptOffer() {
-	(async () => {
-		const keys: KeyPair = await makeNewKey();
-		const chatId: string = document.querySelector('#chat-id').value;
 
-		const response = await fetch(`/api/chat/accept-offer/${chatId}`, {
-			method: "POST",
-			cache: "no-cache",
-			headers: {
-				"Content-Type": "application/json",
-			},
-			body: JSON.stringify(pluckPub(keys)),
-		})
+async function uiMakeChat() {
+    const orderId = getOrderIdFromURL();
+    if (!orderId) {
+        console.error('Order ID is missing from the URL');
+        return;
+    }
 
-		await response.json();
+    const keys = await makeNewKey();
+    try {
+        const response = await fetch('/api/chat/make-offer', {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ pubkey: keys.pub, orderId: orderId })
+        });
 
-		saveKey(keys, chatId);
+        if (!response.ok) {
+            throw new Error(`HTTP error! Status: ${response.status}`);
+        }
 
-		window.location.href = `/ui/chat/room/${chatId}`;
-	})()
+        const { token, acceptOfferUrl } = await response.json();
+        console.log('Generated chat ID:', token);
+        saveKey(keys, token);
+        window.location.href = `/ui/chat/room/${token}`;
+    } catch (error) {
+        console.error('Error creating chatroom:', error);
+    }
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+    const makeOfferButton = document.querySelector('#make-offer-button'); // Adjust the selector to your button
+    if (makeOfferButton) {
+        makeOfferButton.addEventListener('click', uiMakeChat);
+    }
+});
+
+async function uiAcceptOffer() {
+    try {
+        const keys = await makeNewKey();
+        const chatId = document.querySelector('#chat-id').value;
+
+        console.log('Generated keys for accepting offer:', keys);
+
+        const response = await fetch(`/api/chat/accept-offer/${chatId}`, {
+            method: 'POST',
+            cache: 'no-cache',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify(pluckPub(keys)),
+        });
+
+        if (!response.ok) {
+            throw new Error(`HTTP error! Status: ${response.status}`);
+        }
+
+        const data = await response.json();
+
+        console.log('Response data after accepting offer:', data);
+
+        saveKey(keys, chatId);
+        console.log('Keys saved after accepting offer:', keys);
+
+        window.location.href = `/ui/chat/room/${chatId}`;
+    } catch (error) {
+        console.error('Error accepting chatroom:', error);
+    }
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+    initChatroom();
+
+    const acceptOfferButton = document.querySelector('#accept-offer-button'); // Adjust the selector to your button
+    if (acceptOfferButton) {
+        acceptOfferButton.addEventListener('click', uiAcceptOffer);
+    }
+
+    const disputeButton = document.querySelector('#raise-dispute-button'); // Adjust the selector to your button
+    if (disputeButton) {
+        disputeButton.addEventListener('click', raiseDispute);
+    }
+});
+
+async function decryptMessage(crypt: string): Promise<Decrypted> {
+    const chatId: string = document.querySelector('#chat-id').value;
+    const keys: KeyPair = loadKey(chatId);
+
+    if (!keys) {
+        console.error('No keys found for this chatroom.');
+        return { plain: 'Error: No keys found', valid: { mine: false, theirs: false } };
+    }
+
+    const partnerKeyElement = document.querySelector('.partner-key');
+    const myKeyElement = document.querySelector('.my-key');
+
+    if (!partnerKeyElement || !myKeyElement) {
+        console.error('Public key elements not found.');
+        return { plain: 'Error: Public key elements not found', valid: { mine: false, theirs: false } };
+    }
+
+    const partnerKey = await openpgp.readKey({ armoredKey: partnerKeyElement.value });
+    const myKey = await openpgp.readKey({ armoredKey: myKeyElement.value });
+    const privateKey = await openpgp.readPrivateKey({ armoredKey: keys.priv });
+
+    console.log('Attempting to decrypt message with the following keys:');
+    console.log('Partner Key:', partnerKey);
+    console.log('My Key:', myKey);
+    console.log('Private Key:', privateKey);
+
+    try {
+        const message = await openpgp.readMessage({ armoredMessage: crypt });
+        console.log('Message:', message);
+        const payload = await openpgp.decrypt({
+            message,
+            verificationKeys: [partnerKey, myKey],
+            decryptionKeys: privateKey,
+        });
+
+        const decrypted = payload.data;
+        const signatures = payload.signatures;
+
+        console.log('Decrypted payload:', decrypted);
+        console.log('Signatures:', signatures);
+
+        let theirsValid = false;
+        let mineValid = false;
+
+        try {
+            await signatures[0].verified;
+            if (signatures[0].keyID.bytes === partnerKey.keyPacket.keyID.bytes) {
+                theirsValid = true;
+            }
+            if (signatures[0].keyID.bytes === myKey.keyPacket.keyID.bytes) {
+                mineValid = true;
+            }
+        } catch (e) {
+            theirsValid = false;
+            mineValid = false;
+        }
+
+        return { plain: decrypted, valid: { mine: mineValid, theirs: theirsValid } };
+    } catch (error) {
+        console.error('Error decrypting message:', error);
+        return { plain: 'Error decrypting message', valid: { mine: false, theirs: false } };
+    }
 }
 
 function initChatroom() {
-	const chatId: string = document.querySelector('#chat-id').value;
-	const keys: KeyPair = loadKey(chatId);
+    const chatId = document.querySelector('#chat-id').value;
+    const keys = loadKey(chatId);
 
-	// TODO figure out what DOM type to use
-	const whoami: any = document.querySelector('#show-role');
-	// this only needs to run in the chatroom view, not the moderator view
-	if (whoami) {
-		let otherPubKey: string = null;
+    if (!keys || !keys.priv) {
+        console.error('No keys found for this chatroom.');
+        return;
+    }
 
-		const pubA: string = document.querySelector('#pubkey-a').value;
-		const pubB: string = document.querySelector('#pubkey-b').value;
-		if (keys && keys.pub == pubA) {
-			whoami.innerText = 'user A';
-			otherPubKey = pubB;
-			document.querySelector('#pubkey-b').classList.add('partner-key');
-			document.querySelector('#pubkey-a').classList.add('my-key');
-		} else if (keys && keys.pub == pubB) {
-			whoami.innerText = 'user B';
-			otherPubKey = pubA;
-			document.querySelector('#pubkey-a').classList.add('partner-key');
-			document.querySelector('#pubkey-b').classList.add('my-key');
-		} else {
-			whoami.innerText = 'a third party';
-		}
-	} else {
-		if (document.querySelector('#disputed-by').value == 'a') {
-			document.querySelector('#pubkey-b').classList.add('partner-key');
-			document.querySelector('#pubkey-a').classList.add('my-key');
-		} else {
-			document.querySelector('#pubkey-a').classList.add('partner-key');
-			document.querySelector('#pubkey-b').classList.add('my-key');
-		}
-	}
+    console.log('Loaded keys:', keys);
 
-	Array.from(document.querySelectorAll('.crypt')).forEach(async (msgBlock:any) => {
-		try {
-			const data: Decrypted = await decryptMessage(msgBlock.innerText);
-			msgBlock.innerText = data.plain;
-			msgBlock.classList.remove('crypt');
-			msgBlock.classList.add('plaintext');
-			msgBlock.classList.add((data.valid.mine || data.valid.theirs) ? 'valid-sig' : 'bad-sig');
-			console.log(data.valid);
-			if (data.valid.mine) {
-				msgBlock.classList.add('from-me');
-			}
-			if (data.valid.theirs) {
-				msgBlock.classList.add('from-them');
-			}
-		} catch(e) {
-			console.log("not encrypted for us")
-		}
-	})
+    const whoami = document.querySelector('#show-role');
+    if (whoami) {
+        let otherPubKey = null;
+        const pubA = document.querySelector('#pubkey-a').value;
+        const pubB = document.querySelector('#pubkey-b').value;
+
+        if (keys.pub === pubA) {
+            whoami.innerText = 'user A';
+            otherPubKey = pubB;
+            document.querySelector('#pubkey-b').classList.add('partner-key');
+            document.querySelector('#pubkey-a').classList.add('my-key');
+        } else if (keys.pub === pubB) {
+            whoami.innerText = 'user B';
+            otherPubKey = pubA;
+            document.querySelector('#pubkey-a').classList.add('partner-key');
+            document.querySelector('#pubkey-b').classList.add('my-key');
+        } else {
+            whoami.innerText = 'a third party';
+        }
+    } else {
+        if (document.querySelector('#disputed-by').value === 'a') {
+            document.querySelector('#pubkey-b').classList.add('partner-key');
+            document.querySelector('#pubkey-a').classList.add('my-key');
+        } else {
+            document.querySelector('#pubkey-a').classList.add('partner-key');
+            document.querySelector('#pubkey-b').classList.add('my-key');
+        }
+    }
+
+    Array.from(document.querySelectorAll('.crypt')).forEach(async (msgBlock) => {
+        try {
+            console.log('Original encrypted message block:', msgBlock.textContent);
+            const data = await decryptMessage(msgBlock.textContent);
+            msgBlock.textContent = data.plain;
+            msgBlock.classList.remove('crypt');
+            msgBlock.classList.add('plaintext');
+            msgBlock.classList.add((data.valid.mine || data.valid.theirs) ? 'valid-sig' : 'bad-sig');
+            if (data.valid.mine) {
+                msgBlock.classList.add('from-me');
+            }
+            if (data.valid.theirs) {
+                msgBlock.classList.add('from-them');
+            }
+            console.log('Decrypted message block:', msgBlock.textContent);
+        } catch (e) {
+            console.log('Not encrypted for us', e);
+        }
+    });
 }
 
-async function decryptMessage(crypt: string): Promise<Decrypted> {
-	const chatId: string = document.querySelector('#chat-id').value;
-	const keys: KeyPair = loadKey(chatId);
+document.addEventListener('DOMContentLoaded', () => {
+    initChatroom();
 
-	const publicKey = await openpgp.readKey({ armoredKey: document.querySelector('.partner-key').value });
-	const myPublicKey = await openpgp.readKey({ armoredKey: document.querySelector('.my-key').value });
-	const privateKey = await openpgp.readPrivateKey({ armoredKey: keys.priv, });
+    const acceptOfferButton = document.querySelector('#accept-offer-button');
+    if (acceptOfferButton) {
+        acceptOfferButton.addEventListener('click', uiAcceptOffer);
+    }
 
-	const message = await openpgp.readMessage({
-		armoredMessage: crypt // parse armored message
-	});
-	const payload: any = await openpgp.decrypt({
-		message,
-		verificationKeys: [publicKey, myPublicKey], // optional
-		decryptionKeys: privateKey
-	});
-	const decrypted: string = payload.data;
-	const signatures: any = payload.signatures;
-	console.log(decrypted); // 'Hello, World!'
-	// check signature validity (signed messages only)
-	let theirsValid: boolean = false;
-	let mineValid: boolean = false;
-	console.log(signatures);
-	console.log(publicKey);
-	try {
-		await signatures[0].verified; // throws on invalid signature
-		if (signatures[0].keyID.bytes == publicKey.keyPacket.keyID.bytes) {
-			theirsValid = true;
-		}
-		if (signatures[0].keyID.bytes == myPublicKey.keyPacket.keyID.bytes) {
-			mineValid = true;
-		}
-	} catch (e) {
-		theirsValid = false;
-		mineValid = false;
-	}	
+    const disputeButton = document.querySelector('#raise-dispute-button');
+    if (disputeButton) {
+        disputeButton.addEventListener('click', raiseDispute);
+    }
+});
 
-	return {plain: decrypted, valid: {mine: mineValid, theirs: theirsValid}};
-}
+async function encryptMessage(plain: string): Promise<string> {
+    const chatId = document.querySelector('#chat-id')?.value;
+    const keys = loadKey(chatId);
 
-async function encryptMessage(plain: string) : Promise<string> {
-	const chatId: string = document.querySelector('#chat-id').value;
-	const keys: KeyPair = loadKey(chatId);
+    const publicKeyElement = document.querySelector('.partner-key');
+    const myPublicKeyElement = document.querySelector('.my-key');
 
-	const publicKey = await openpgp.readKey({ armoredKey: document.querySelector('.partner-key').value });
-	const myPublicKey = await openpgp.readKey({ armoredKey: document.querySelector('.my-key').value });
-	const privateKey = await openpgp.readPrivateKey({ armoredKey: keys.priv, });
+    if (!publicKeyElement || !myPublicKeyElement) {
+        throw new Error('Public key elements not found.');
+    }
 
-	const encrypted = await openpgp.encrypt({
-		message: await openpgp.createMessage({ text: plain }), // input as Message object
-		encryptionKeys: [publicKey, myPublicKey],
-		signingKeys: privateKey // optional
-	});
+    const publicKey = await openpgp.readKey({ armoredKey: publicKeyElement.value });
+    const myPublicKey = await openpgp.readKey({ armoredKey: myPublicKeyElement.value });
+    const privateKey = await openpgp.readPrivateKey({ armoredKey: keys.priv });
 
-	return encrypted;
+    console.log("Public Key:", publicKey);
+    console.log("My Public Key:", myPublicKey);
+    console.log("Private Key:", privateKey);
+
+    const encrypted = await openpgp.encrypt({
+        message: await openpgp.createMessage({ text: plain }),
+        encryptionKeys: [publicKey, myPublicKey],
+        signingKeys: privateKey,
+    });
+
+    console.log("Encrypted Message:", encrypted);
+
+    return encrypted;
 }
 
 function sendMessage() {
-	(async () => {
-		const chatbox: any = document.querySelector('#chat');
-		const plain: string = chatbox.value;
+    (async () => {
+        const chatbox = document.querySelector('#chat');
+        const plain = chatbox.value;
 
-		const msg: string = await encryptMessage(plain);
+        try {
+            const msg = await encryptMessage(plain);
+            const chatId = document.querySelector('#chat-id')?.value;
 
-		const chatId: string = document.querySelector('#chat-id').value;
-		const response = await fetch(`/api/chat/add-message/${chatId}`, {
-			method: "POST",
-			cache: "no-cache",
-			headers: {
-				"Content-Type": "application/json",
-			},
-			body: JSON.stringify({message: msg}),
-		})
+            if (!chatId) {
+                throw new Error('Chat ID not found.');
+            }
 
-		if ((await response.json()).ok) {
-			chatbox.value = '';
-			window.location.reload();
-		}
-	})()
+            const response = await fetch(`/api/chat/add-message/${chatId}`, {
+                method: 'POST',
+                cache: 'no-cache',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({ message: msg }),
+            });
+
+            if (response.ok) {
+                chatbox.value = '';
+                window.location.reload();
+            } else {
+                throw new Error(`HTTP error! Status: ${response.status}`);
+            }
+        } catch (error) {
+            console.error('Error sending message:', error);
+        }
+    })();
 }
 
 function raiseDispute() {
-	(async () => {
-		const chatId: string = document.querySelector('#chat-id').value;
-		const keys: KeyPair = loadKey(chatId);
+    (async () => {
+        const chatId: string = document.querySelector('#chat-id').value;
+        const keys: KeyPair = loadKey(chatId);
 
-		// TODO better user A/B storage (at a later date; might depend on the rest of the app)
-		const whoami: any = document.querySelector('#show-role');
-		const user: string = whoami.innerText == 'user A' ? 'a' : 'b';
+        const whoami: any = document.querySelector('#show-role');
+        const user: string = whoami.innerText === 'user A' ? 'a' : 'b';
 
-		const response = await fetch(`/api/chat/raise-dispute/${chatId}`, {
-			method: "POST",
-			cache: "no-cache",
-			headers: {
-				"Content-Type": "application/json",
-			},
-			body: JSON.stringify({
-				privateKey: keys.priv,
-				byUser: user,
-			}),
-		})
+        const response = await fetch(`/api/chat/raise-dispute/${chatId}`, {
+            method: 'POST',
+            cache: 'no-cache',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                privateKey: keys.priv,
+                byUser: user,
+            }),
+        });
 
-		if ((await response.json()).ok) {
-			window.location.reload();
-		}
-	})()
+        if ((await response.json()).ok) {
+            window.location.reload();
+        }
+    })();
 }

@@ -1,9 +1,37 @@
+doctype html
 html
-	head
-		meta(charset="utf-8")
-		meta(name="viewport" content="width=device-width, initial-scale=1")
-		script(src="/js/lib/openpgp.min.js")
-		script(src="/js/app/chatroom.js")
-	body
-		button(onclick="uiMakeOffer()")
-			| make new offer
+  head
+    meta(charset="utf-8")
+    meta(name="viewport" content="width=device-width, initial-scale=1")
+    title Make Offer
+  body
+    h1 Make an Offer
+    button(onclick="uiMakeChat()") Make Offer
+    script(src="/js/lib/openpgp.min.js")
+    script(src="/js/app/chatroom.js")
+    script.
+      async function uiMakeChat() {
+        const keys = await makeNewKey();
+        const urlParams = new URLSearchParams(window.location.search);
+        const orderId = urlParams.get('orderId');
+        if (!orderId) {
+          console.error('Order ID is missing from the URL');
+          return;
+        }
+        const response = await fetch('/api/chat/make-offer?orderId=' + orderId, {
+          method: "POST",
+          cache: "no-cache",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify(pluckPub(keys)),
+        });
+        if (!response.ok) {
+          throw new Error(`HTTP error! Status: ${response.status}`);
+        }
+        const { token, acceptOfferUrl } = await response.json();
+        console.log('Generated chat ID:', token);
+        saveKey(keys, token);
+        alert(`Make Offer URL: /ui/chat/room/${token}\nAccept Offer URL: ${acceptOfferUrl}`);
+        window.location.href = `/ui/chat/room/${token}`;
+      }
