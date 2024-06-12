@@ -2,6 +2,7 @@
 
 - clone the repo
 - install typescript if not installed
+- put the postgres credentials in .env file at root
 - run `npm install`
 - run `./build.sh` if you haven't yet done so
 
