@@ -1,6 +1,7 @@
 # Installation
 
 - clone the repo
+- install typescript if not installed
 - run `npm install`
 - run `./build.sh` if you haven't yet done so
 
