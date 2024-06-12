@@ -13,7 +13,7 @@ I haven't set up auto-compilation of typescript, so for the time being, run `./b
 
 First, run the app with `./run.sh`
 
-Load the following URL in a browser: http://localhost:3456/ui/chat/make-offer
+Load the following URL in a browser: http://localhost:3456/ui/chat/make-offer?orderId=
 
 Click the "make offer" button, and you'll be taken to the chatroom. There's a link that you can share with someone else; open that in another browser (or a private/incognito window), and in the other browser, hit "accept offer".
 
