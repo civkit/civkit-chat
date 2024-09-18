@@ -10,7 +10,8 @@ app.use(express.json());
 const fsProm = require('fs/promises');
 const path = require('path');
 const db = require('./dbConfig.ts'); // Adjust the path to where you've set up the pool
-
+const { PrismaClient } = require('@prisma/client');
+const prisma = new PrismaClient();
 // Helper functions
 async function writeTo(chat_id, data) {
     if (!chat_id) {
@@ -31,22 +32,23 @@ async function loadFrom(chat_id) {
 // Update the database with the token, chatroom_url, and accept offer URL
 async function updateDatabaseWithToken(orderId, token, acceptOfferUrl, chatroomUrl) {
     try {
-        const selectQuery = 'SELECT * FROM chats WHERE order_id = $1';
-        const selectResult = await db.query(selectQuery, [orderId]);
+        const order_id = parseInt(orderId, 10);
+        const existingChat = await prisma.chat.findFirst({
+            where: { order_id }
+        });
 
-        if (selectResult.rows.length > 0) {
-            // Update existing row
-            const updateQuery = 'UPDATE chats SET token = $1, accept_offer_url = $2, chatroom_url = $3 WHERE order_id = $4 RETURNING *';
-            const updateResult = await db.query(updateQuery, [token, acceptOfferUrl, chatroomUrl, orderId]);
-            console.log("Database update result:", updateResult.rows);
+        if (existingChat) {
+            await prisma.chat.update({
+                where: { chat_id: existingChat.chat_id },
+                data: { token, accept_offer_url: acceptOfferUrl, chatroom_url: chatroomUrl }
+            });
         } else {
-            // Insert new row
-            const insertQuery = 'INSERT INTO chats (order_id, token, accept_offer_url, chatroom_url) VALUES ($1, $2, $3, $4) RETURNING *';
-            const insertResult = await db.query(insertQuery, [orderId, token, acceptOfferUrl, chatroomUrl]);
-            console.log("Database insert result:", insertResult.rows);
+            await prisma.chat.create({
+                data: { order_id, token, accept_offer_url: acceptOfferUrl, chatroom_url: chatroomUrl }
+            });
         }
     } catch (err) {
-        console.error("Error updating database:", err.stack);
+        console.error("Error updating database:", err);
     }
 }
 
@@ -78,8 +80,9 @@ app.post('/api/chat/make-offer', async (req, res) => {
 
     await writeTo(token, data);
 
-    const acceptOfferUrl = `http://localhost:3456/ui/chat/accept-offer/${token}?orderId=${orderId}`;
-    const chatroomUrl = `http://localhost:3456/ui/chat/room/${token}`;
+    const baseUrl = process.env.BASE_URL || 'http://localhost:3456';
+    const acceptOfferUrl = `${baseUrl}/ui/chat/accept-offer/${token}?orderId=${orderId}`;
+    const chatroomUrl = `${baseUrl}/ui/chat/room/${token}`;
     console.log(`Accept Offer URL: ${acceptOfferUrl}`);
 
     await updateDatabaseWithToken(orderId, token, acceptOfferUrl, chatroomUrl);
