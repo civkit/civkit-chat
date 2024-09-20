@@ -11,27 +11,42 @@ html
     script(src="/js/app/chatroom.js")
     script.
       async function uiMakeChat() {
-        const keys = await makeNewKey();
-        const urlParams = new URLSearchParams(window.location.search);
-        const orderId = urlParams.get('orderId');
-        if (!orderId) {
-          console.error('Order ID is missing from the URL');
-          return;
+        try {
+          const keys = await makeNewKey();
+          const urlParams = new URLSearchParams(window.location.search);
+          const orderId = urlParams.get('orderId');
+          if (!orderId) {
+            throw new Error('Order ID is missing from the URL');
+          }
+
+          const url = '/api/chat/make-offer?orderId=' + orderId;
+          console.log('Attempting to fetch from:', url);
+
+          const response = await fetch(url, {
+            method: "POST",
+            cache: "no-cache",
+            headers: {
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify(pluckPub(keys)),
+          });
+
+          if (!response.ok) {
+            throw new Error(`HTTP error! Status: ${response.status}`);
+          }
+
+          const { token, acceptOfferUrl } = await response.json();
+          console.log('Generated chat ID:', token);
+          saveKey(keys, token);
+          alert(`Make Offer URL: /ui/chat/room/${token}\nAccept Offer URL: ${acceptOfferUrl}`);
+          window.location.href = `/ui/chat/room/${token}`;
+        } catch (error) {
+          console.error('Error in uiMakeChat:', error);
+          if (error.name === 'TypeError' && error.message === 'Failed to fetch') {
+            console.error('Network error: Unable to connect to the server');
+            alert('Unable to connect to the server. Please check your internet connection and try again.');
+          } else {
+            alert(`An error occurred: ${error.message}\nPlease check the console for more details.`);
+          }
         }
-        const response = await fetch('/api/chat/make-offer?orderId=' + orderId, {
-          method: "POST",
-          cache: "no-cache",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify(pluckPub(keys)),
-        });
-        if (!response.ok) {
-          throw new Error(`HTTP error! Status: ${response.status}`);
-        }
-        const { token, acceptOfferUrl } = await response.json();
-        console.log('Generated chat ID:', token);
-        saveKey(keys, token);
-        alert(`Make Offer URL: /ui/chat/room/${token}\nAccept Offer URL: ${acceptOfferUrl}`);
-        window.location.href = `/ui/chat/room/${token}`;
       }
