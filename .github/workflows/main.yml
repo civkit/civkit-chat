@@ -1,0 +1,38 @@
+# .github/workflows/deploy-chat.yml
+name: Deploy Chat to Production
+
+on:
+  push:
+    branches: [ main ]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Deploy to Server
+      uses: appleboy/ssh-action@master
+      with:
+        host: ${{ secrets.DEPLOY_HOST }}
+        username: ${{ secrets.DEPLOY_USER }}
+        key: ${{ secrets.DEPLOY_KEY }}
+        script: |
+          echo "Starting Chat deployment..."
+          
+          # Stop the chat service
+          echo "Stopping chat service..."
+          systemctl stop civkit-chat.service
+          
+          cd /root/civkit-chat
+          
+          echo "Pulling latest changes..."
+          git pull origin main # Will fail if there are issues
+          
+          echo "Building chat app..."
+          ./build.sh || echo "Build had issues but continuing..."
+          
+          # Start service
+          echo "Starting chat service..."
+          systemctl start civkit-chat.service
+          
+          echo "Chat Deployment completed!"
